@@ -35,13 +35,29 @@ describe('pollPaths', () => {
 });
 
 describe('isHeating', () => {
-  it('is false when idle with the flame off', () => {
-    expect(isHeating(stateOf(), 'zn1')).toBe(false);
-  });
-  it('is true when the flame is on', () => {
+  const withStatus = (status: string, flame = 'off') => {
     const s = stateOf();
-    s.set('/heatSources/flameIndication', { ...s.get('/heatSources/flameIndication')!, value: 'on' });
-    expect(isHeating(s, 'zn1')).toBe(true);
+    s.set('/zones/zn1/status', { ...s.get('/zones/zn1/status')!, value: status });
+    s.set('/heatSources/flameIndication', { ...s.get('/heatSources/flameIndication')!, value: flame });
+    return s;
+  };
+
+  it('is true when the zone asks for heat', () => {
+    expect(isHeating(withStatus('heat request'), 'zn1')).toBe(true);
+  });
+
+  it('is false for every other status', () => {
+    for (const status of ['idle', 'low battery', 'comm error']) {
+      expect(isHeating(withStatus(status), 'zn1')).toBe(false);
+    }
+  });
+
+  it('ignores the boiler flame, which is on whenever any zone heats', () => {
+    expect(isHeating(withStatus('idle', 'on'), 'zn1')).toBe(false);
+  });
+
+  it('no longer polls the boiler flame', () => {
+    expect(pollPaths(['zn1'])).not.toContain('/heatSources/flameIndication');
   });
 });
 

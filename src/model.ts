@@ -5,7 +5,6 @@ export type Write = { path: string; value: unknown };
 export type SetpointBehaviour = 'override' | 'manual';
 
 export const SYSTEM_PATHS = {
-  flame: '/heatSources/flameIndication',
   humidity: '/system/sensors/humidity/indoor_h1',
   outdoorTemp: '/system/sensors/temperatures/outdoor_t1',
   away: '/system/awayMode/enabled',
@@ -108,8 +107,16 @@ export const isAvailable = (state: State, path: string): boolean => {
   return !!r && r.available !== 'false';
 };
 
+/** Zone status while the zone is asking the boiler for heat. */
+export const HEAT_REQUEST = 'heat request';
+
+/**
+ * Whether a zone is heating: its own status is "heat request". Every other
+ * status (idle, low battery, comm error) shows as not heating. The boiler flame
+ * isn't used, as it's on whenever any zone heats.
+ */
 export function isHeating(state: State, zone: string): boolean {
-  return str(state, SYSTEM_PATHS.flame) === 'on' || str(state, zonePaths(zone).status) === 'heating';
+  return str(state, zonePaths(zone).status) === HEAT_REQUEST;
 }
 
 /**

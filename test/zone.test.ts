@@ -180,3 +180,16 @@ describe('battery status only where there are batteries', () => {
     expect(cached.getService(Service.Battery)).toBe(battery);
   });
 });
+
+describe('heating indicator', () => {
+  it('shows Heating only for the zone that asks for heat', () => {
+    const { thermostat, gateway, push } = zoneAccessory('zn1');
+    const current = thermostat.getCharacteristic(Characteristic.CurrentHeatingCoolingState);
+    gateway.state.set('/zones/zn1/status', { ...gateway.state.get('/zones/zn1/status')!, value: 'heat request' });
+    push();
+    expect(current.value).toBe(Characteristic.CurrentHeatingCoolingState.HEAT);
+    gateway.state.set('/zones/zn1/status', { ...gateway.state.get('/zones/zn1/status')!, value: 'idle' });
+    push();
+    expect(current.value).toBe(Characteristic.CurrentHeatingCoolingState.OFF);
+  });
+});
