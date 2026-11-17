@@ -2,15 +2,21 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 
 import type { GatewayController } from '../gateway.js';
 import {
-  HUMIDITY_ZONE, isAvailable, isHeating, num, setpointWrites, str, SYSTEM_PATHS, TEMPERATURE_RANGE, zonePaths, zoneTemperature,
+  HUMIDITY_ZONE, isAvailable, isHeating, num, setpointWrites, str, SYSTEM_PATHS, TEMPERATURE_RANGE, zoneBattery, zonePaths, zoneTemperature,
 } from '../model.js';
 import type { EasyControlPlatform } from '../platform.js';
+
+/** Battery levels shown for ok and low batteries; Bosch gives no percentage. */
+const BATTERY_LEVEL_OK = 100;
+const BATTERY_LEVEL_LOW = 10;
 
 /** One HomeKit Thermostat per CT200 zone. */
 export class ZoneAccessory {
   private readonly service: Service;
   private readonly paths: ReturnType<typeof zonePaths>;
   private noReading = false;
+  private readonly battery: Service;
+  private lowBattery = false;
 
   constructor(
     private readonly platform: EasyControlPlatform,
@@ -60,6 +66,20 @@ export class ZoneAccessory {
     } else if (this.service.testCharacteristic(Characteristic.CurrentRelativeHumidity)) {
       // Cached accessories from earlier versions had humidity on every zone.
       this.service.removeCharacteristic(this.service.getCharacteristic(Characteristic.CurrentRelativeHumidity));
+    }
+
+    // The radiator valves' batteries, shown as the thermostat's battery status.
+    // Bosch reports only ok/low, so the level is a stand-in (otherwise it shows
+    // as 0 %). Charging doesn't apply to the valves' batteries, so it's left out.
+    this.battery = accessory.getService(Service.Battery) ?? accessory.addService(Service.Battery);
+    this.service.addLinkedService(this.battery);
+    this.battery.getCharacteristic(Characteristic.StatusLowBattery)
+      .onGet(() => this.batteryStatus());
+    this.battery.getCharacteristic(Characteristic.BatteryLevel)
+      .onGet(() => this.batteryLevel());
+    if (this.battery.testCharacteristic(Characteristic.ChargingState)) {
+      // Added by an earlier test build.
+      this.battery.removeCharacteristic(this.battery.getCharacteristic(Characteristic.ChargingState));
     }
 
     gateway.onUpdate(() => this.push());
@@ -126,6 +146,34 @@ export class ZoneAccessory {
     }
   }
 
+  private batteryStatus(): number {
+    const { StatusLowBattery } = this.platform.api.hap.Characteristic;
+    return zoneBattery(this.gateway.state, this.zone).low
+      ? StatusLowBattery.BATTERY_LEVEL_LOW
+      : StatusLowBattery.BATTERY_LEVEL_NORMAL;
+  }
+
+  /** Stand-in battery level: Bosch reports only ok or low. */
+  private batteryLevel(): number {
+    return zoneBattery(this.gateway.state, this.zone).low ? BATTERY_LEVEL_LOW : BATTERY_LEVEL_OK;
+  }
+
+  /** Updates the battery status and logs once when it goes low and once when it's OK again. */
+  private pushBattery(): void {
+    const { Characteristic } = this.platform.api.hap;
+    const name = this.accessory.displayName;
+    const { low, lowDevices } = zoneBattery(this.gateway.state, this.zone);
+    if (low && !this.lowBattery) {
+      const valves = lowDevices.map((d) => `"${d}"`).join(', ');
+      this.platform.log.warn(`${name}: low battery in radiator valve${lowDevices.length > 1 ? 's' : ''} ${valves}. Replace the batteries soon.`);
+    } else if (!low && this.lowBattery) {
+      this.platform.log.info(`${name}: radiator valve batteries OK again.`);
+    }
+    this.lowBattery = low;
+    this.battery.updateCharacteristic(Characteristic.StatusLowBattery, this.batteryStatus());
+    this.battery.updateCharacteristic(Characteristic.BatteryLevel, this.batteryLevel());
+  }
+
   private push(): void {
     const { Characteristic } = this.platform.api.hap;
     const s = this.gateway.state;
@@ -135,6 +183,7 @@ export class ZoneAccessory {
       }
     };
     this.pushTemperature();
+    this.pushBattery();
     update(Characteristic.TargetTemperature, num(s, this.paths.setpoint));
     update(Characteristic.CurrentHeatingCoolingState, this.currentState());
     if (str(s, this.paths.userMode)) {

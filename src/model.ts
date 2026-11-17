@@ -12,6 +12,8 @@ export const SYSTEM_PATHS = {
   boost: '/heatingCircuits/hc1/boostMode',
   boostTemperature: '/heatingCircuits/hc1/boostTemperature',
   boostDuration: '/heatingCircuits/hc1/boostDuration',
+  /** Every paired device (the CT200 and its radiator valves) with battery state and zone. */
+  devices: '/devices/list',
 } as const;
 
 /**
@@ -137,4 +139,38 @@ export function applyWrites(state: Map<string, Resource>, writes: Write[]): void
       state.set(w.path, { ...r, value: w.value });
     }
   }
+}
+
+/** A radiator valve's battery in `/devices/list` when it needs replacing. */
+export const LOW_BATTERY = 'low battery';
+
+/** One entry of `/devices/list`. */
+export interface Device {
+  id: number;
+  /** Base64-encoded, like zone names. */
+  name?: string;
+  /** Zone number: 1 for zn1. */
+  zone?: number;
+  /** `ok` or `low battery` for radiator valves; `unknown` for the mains-powered CT200. */
+  battery?: string;
+  type?: string;
+}
+
+export function devices(state: State): Device[] {
+  const v = state.get(SYSTEM_PATHS.devices)?.value;
+  return Array.isArray(v) ? (v as Device[]) : [];
+}
+
+export interface ZoneBattery {
+  low: boolean;
+  /** Names of the zone's devices reporting a low battery. */
+  lowDevices: string[];
+}
+
+/** Whether any device in the zone has a low battery, from each device's battery in `/devices/list`. */
+export function zoneBattery(state: State, zone: string): ZoneBattery {
+  const lowDevices = devices(state)
+    .filter((d) => `zn${d.zone}` === zone && d.battery === LOW_BATTERY)
+    .map((d) => decodeName(d.name, `device ${d.id}`));
+  return { low: lowDevices.length > 0, lowDevices };
 }

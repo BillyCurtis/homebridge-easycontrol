@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { decodeName, isHeating, pollPaths, setpointWrites, zoneIds } from '../src/model.js';
-import { stateOf, zonesRefEnum } from './fixtures.js';
+import { decodeName, isHeating, pollPaths, setpointWrites, zoneBattery, zoneIds } from '../src/model.js';
+import { ct200, devicesList, stateOf, zonesRefEnum } from './fixtures.js';
 
 describe('zoneIds', () => {
   it('keeps only znN references', () => {
@@ -60,5 +60,31 @@ describe('setpointWrites', () => {
     expect(setpointWrites(s, 'zn1', 19.5, 'override')).toEqual([
       { path: '/zones/zn1/manualTemperatureHeating', value: 19.5 },
     ]);
+  });
+});
+
+describe('zoneBattery', () => {
+  const withDevices = (batteries: Record<number, string> = {}) => stateOf([...ct200, devicesList(batteries)]);
+
+  it('is OK when every valve in the zone is OK, ignoring the CT200\'s unknown battery', () => {
+    expect(zoneBattery(withDevices(), 'zn1')).toEqual({ low: false, lowDevices: [] });
+  });
+
+  it('is low when any valve in the zone is low, and names it', () => {
+    expect(zoneBattery(withDevices({ 3: 'low battery' }), 'zn1')).toEqual({ low: true, lowDevices: ['Lounge'] });
+  });
+
+  it('ignores low valves in other zones', () => {
+    expect(zoneBattery(withDevices({ 4: 'low battery' }), 'zn1').low).toBe(false);
+    expect(zoneBattery(withDevices({ 4: 'low battery' }), 'zn2')).toEqual({ low: true, lowDevices: ['Hall'] });
+  });
+
+  it('names every low valve in the zone', () => {
+    expect(zoneBattery(withDevices({ 2: 'low battery', 3: 'low battery' }), 'zn1'))
+      .toEqual({ low: true, lowDevices: ['Kitchen', 'Lounge'] });
+  });
+
+  it('polls the device list', () => {
+    expect(pollPaths(['zn1'])).toContain('/devices/list');
   });
 });

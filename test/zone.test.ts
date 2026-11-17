@@ -7,7 +7,7 @@ import type { Resource } from '../src/api/client.js';
 import { ZoneAccessory } from '../src/accessories/zone.js';
 import type { GatewayController } from '../src/gateway.js';
 import type { EasyControlPlatform } from '../src/platform.js';
-import { stateOf } from './fixtures.js';
+import { devicesList, stateOf } from './fixtures.js';
 
 const { Characteristic, Service } = hap;
 
@@ -100,5 +100,52 @@ describe('radiator valve connection', () => {
     expect(thermostat.getCharacteristic(Characteristic.CurrentTemperature).statusCode)
       .toBe(hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     expect(log.warn.mock.calls[0][0]).toMatch(/Bosch reports 1000 °C/);
+  });
+});
+
+describe('radiator valve batteries', () => {
+  const battery = (accessory: hap.Accessory) =>
+    accessory.getService(Service.Battery)!.getCharacteristic(Characteristic.StatusLowBattery);
+
+  it('adds a battery status grouped with the thermostat, normal when all valves are OK', () => {
+    const { accessory, thermostat, gateway, log, push } = zoneAccessory('zn1');
+    gateway.state.set('/devices/list', devicesList());
+    push();
+    expect(thermostat.linkedServices).toContain(accessory.getService(Service.Battery));
+    expect(battery(accessory).value).toBe(Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
+    const service = accessory.getService(Service.Battery)!;
+    expect(service.getCharacteristic(Characteristic.BatteryLevel).value).toBe(100);
+    expect(service.testCharacteristic(Characteristic.ChargingState)).toBe(false);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('shows low battery and logs the valve once, then clears when it is OK again', () => {
+    const { accessory, gateway, log, push } = zoneAccessory('zn1');
+    gateway.state.set('/devices/list', devicesList({ 2: 'low battery' }));
+    push();
+    push();
+    expect(battery(accessory).value).toBe(Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW);
+    expect(accessory.getService(Service.Battery)!.getCharacteristic(Characteristic.BatteryLevel).value).toBe(10);
+    expect(log.warn).toHaveBeenCalledOnce();
+    expect(log.warn.mock.calls[0][0]).toBe('zn1: low battery in radiator valve "Kitchen". Replace the batteries soon.');
+
+    gateway.state.set('/devices/list', devicesList());
+    push();
+    expect(battery(accessory).value).toBe(Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL);
+    expect(log.info).toHaveBeenCalledWith('zn1: radiator valve batteries OK again.');
+  });
+
+  it('removes a charging status left on a cached accessory', () => {
+    const cached = new hap.Accessory('zn1', hap.uuid.generate('zn1'));
+    cached.addService(Service.Battery).getCharacteristic(Characteristic.ChargingState);
+    zoneAccessory('zn1', cached);
+    expect(cached.getService(Service.Battery)!.testCharacteristic(Characteristic.ChargingState)).toBe(false);
+  });
+
+  it('reuses the battery status of a cached accessory', () => {
+    const cached = new hap.Accessory('zn1', hap.uuid.generate('zn1'));
+    zoneAccessory('zn1', cached);
+    zoneAccessory('zn1', cached);
+    expect(cached.services.filter((s) => s.UUID === Service.Battery.UUID)).toHaveLength(1);
   });
 });

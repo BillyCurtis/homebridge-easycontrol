@@ -31,3 +31,18 @@ export const ct200: Resource[] = [
 ];
 
 export const stateOf = (resources: Resource[] = ct200) => new Map(resources.map((r) => [r.id, r]));
+
+const b64 = (s: string) => Buffer.from(s).toString('base64');
+
+/** `/devices/list` as a CT200 with radiator valves reports it (names changed). */
+export const devicesList = (batteries: Record<number, string> = {}): Resource => ({
+  id: '/devices/list',
+  type: 'deviceArray',
+  writeable: 0,
+  value: [
+    { name: b64('EasyControl'), zone: 1, protocol: 'no_protocol', id: 1, battery: 'unknown', signal: 0, type: 'thermostat' },
+    { name: b64('Kitchen'), zone: 1, protocol: 'homematicip', id: 2, battery: batteries[2] ?? 'ok', signal: 72, type: 'thermostat_valve', warning: 0 },
+    { name: b64('Lounge'), zone: 1, protocol: 'homematicip', id: 3, battery: batteries[3] ?? 'ok', signal: 76, type: 'thermostat_valve', warning: 0 },
+    { name: b64('Hall'), zone: 2, protocol: 'homematicip', id: 4, battery: batteries[4] ?? 'ok', signal: 78, type: 'thermostat_valve', warning: 0 },
+  ],
+});
