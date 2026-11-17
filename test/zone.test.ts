@@ -2,6 +2,8 @@ import * as hap from '@homebridge/hap-nodejs';
 import type { PlatformAccessory } from 'homebridge';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { Resource } from '../src/api/client.js';
+
 import { ZoneAccessory } from '../src/accessories/zone.js';
 import type { GatewayController } from '../src/gateway.js';
 import type { EasyControlPlatform } from '../src/platform.js';
@@ -12,7 +14,8 @@ const { Characteristic, Service } = hap;
 function zoneAccessory(zone: string, accessory = new hap.Accessory(zone, hap.uuid.generate(zone))) {
   const listeners: (() => void)[] = [];
   const gateway = { state: stateOf(), onUpdate: (fn: () => void) => listeners.push(fn) };
-  const platform = { api: { hap }, config: {}, log: { info: vi.fn() }, guard: vi.fn() };
+  const log = { info: vi.fn(), warn: vi.fn() };
+  const platform = { api: { hap }, config: {}, log, guard: vi.fn() };
   new ZoneAccessory(
     platform as unknown as EasyControlPlatform,
     accessory as unknown as PlatformAccessory,
@@ -20,7 +23,7 @@ function zoneAccessory(zone: string, accessory = new hap.Accessory(zone, hap.uui
     zone,
   );
   const thermostat = accessory.getService(Service.Thermostat)!;
-  return { accessory, thermostat, push: () => listeners.forEach((fn) => fn()) };
+  return { accessory, thermostat, gateway, log, push: () => listeners.forEach((fn) => fn()) };
 }
 
 describe('zone humidity', () => {
@@ -42,5 +45,60 @@ describe('zone humidity', () => {
     cached.addService(Service.Thermostat).getCharacteristic(Characteristic.CurrentRelativeHumidity);
     const { thermostat } = zoneAccessory('zn2', cached);
     expect(thermostat.testCharacteristic(Characteristic.CurrentRelativeHumidity)).toBe(false);
+  });
+});
+
+describe('radiator valve connection', () => {
+  const set = (state: Map<string, Resource>, path: string, value: string | number) => {
+    state.set(path, { ...state.get(path)!, value });
+  };
+  const lose = (state: Map<string, Resource>) => {
+    set(state, '/zones/zn1/status', 'comm error');
+    set(state, '/zones/zn1/temperatureActual', 1000);
+  };
+
+  it('shows No Response while the zone status is "comm error"', async () => {
+    const { thermostat, gateway, log, push } = zoneAccessory('zn1');
+    push();
+    lose(gateway.state);
+    push();
+    const current = thermostat.getCharacteristic(Characteristic.CurrentTemperature);
+    expect(current.statusCode).toBe(hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    expect(current.value).toBeCloseTo(22.7); // the 1000 °C placeholder never reaches HomeKit
+    await expect(current.handleGetRequest()).rejects.toBe(hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    expect(log.warn).toHaveBeenCalledOnce();
+    expect(log.warn.mock.calls[0][0]).toMatch(/no connection to the radiator valve \(status "comm error"\)/);
+  });
+
+  it('logs the lost connection only once while it lasts', () => {
+    const { gateway, log, push } = zoneAccessory('zn1');
+    lose(gateway.state);
+    push();
+    push();
+    push();
+    expect(log.warn).toHaveBeenCalledOnce();
+  });
+
+  it('recovers by itself when the valve reconnects', async () => {
+    const { thermostat, gateway, log, push } = zoneAccessory('zn1');
+    lose(gateway.state);
+    push();
+    set(gateway.state, '/zones/zn1/status', 'idle');
+    set(gateway.state, '/zones/zn1/temperatureActual', 19.5);
+    push();
+    const current = thermostat.getCharacteristic(Characteristic.CurrentTemperature);
+    expect(current.statusCode).toBe(hap.HAPStatus.SUCCESS);
+    expect(current.value).toBeCloseTo(19.5);
+    expect(await current.handleGetRequest()).toBeCloseTo(19.5);
+    expect(log.info).toHaveBeenCalledWith(expect.stringMatching(/radiator valve connection is back \(19.5 °C\)/));
+  });
+
+  it('also treats a temperature HomeKit cannot show as no connection', () => {
+    const { thermostat, gateway, log, push } = zoneAccessory('zn1');
+    set(gateway.state, '/zones/zn1/temperatureActual', 1000); // status still "idle"
+    push();
+    expect(thermostat.getCharacteristic(Characteristic.CurrentTemperature).statusCode)
+      .toBe(hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    expect(log.warn.mock.calls[0][0]).toMatch(/Bosch reports 1000 °C/);
   });
 });

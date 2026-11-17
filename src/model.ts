@@ -59,6 +59,37 @@ export function decodeName(raw: unknown, fallback: string): string {
   return looksBase64 && /^[\p{L}\p{N}\p{P}\p{Zs}]+$/u.test(decoded) ? decoded : raw;
 }
 
+/** The range HomeKit accepts for a current temperature, in °C. */
+export const TEMPERATURE_RANGE = { min: -50, max: 100 } as const;
+
+/** Zone status while the CT200 can't reach the zone's radiator valve (eTRV). */
+export const COMM_ERROR = 'comm error';
+
+export interface ZoneTemperature {
+  /** A temperature HomeKit can show, when there is one. */
+  temperature?: number;
+  /** Why there's no reading, when Bosch says there's a problem. */
+  problem?: string;
+}
+
+/**
+ * The zone's current temperature, or the reason there isn't one. While an eTRV
+ * has no connection to the CT200 (flat battery, out of range, needs re-pairing,
+ * still reconnecting after a power cut) Bosch sets the zone's status to
+ * "comm error" and reports its temperature as 1000 °C, which isn't a reading.
+ */
+export function zoneTemperature(state: State, zone: string): ZoneTemperature {
+  const paths = zonePaths(zone);
+  const raw = num(state, paths.temperature);
+  if (str(state, paths.status) === COMM_ERROR) {
+    return { problem: `status "${COMM_ERROR}"` };
+  }
+  if (raw !== undefined && (raw < TEMPERATURE_RANGE.min || raw > TEMPERATURE_RANGE.max)) {
+    return { problem: `Bosch reports ${raw} °C` };
+  }
+  return { temperature: raw };
+}
+
 export const num = (state: State, path: string): number | undefined => {
   const v = state.get(path)?.value;
   return typeof v === 'number' ? v : undefined;

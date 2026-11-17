@@ -1,13 +1,16 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
 import type { GatewayController } from '../gateway.js';
-import { HUMIDITY_ZONE, isAvailable, isHeating, num, setpointWrites, str, SYSTEM_PATHS, zonePaths } from '../model.js';
+import {
+  HUMIDITY_ZONE, isAvailable, isHeating, num, setpointWrites, str, SYSTEM_PATHS, TEMPERATURE_RANGE, zonePaths, zoneTemperature,
+} from '../model.js';
 import type { EasyControlPlatform } from '../platform.js';
 
 /** One HomeKit Thermostat per CT200 zone. */
 export class ZoneAccessory {
   private readonly service: Service;
   private readonly paths: ReturnType<typeof zonePaths>;
+  private noReading = false;
 
   constructor(
     private readonly platform: EasyControlPlatform,
@@ -22,8 +25,8 @@ export class ZoneAccessory {
     this.service.setCharacteristic(Characteristic.Name, accessory.displayName);
 
     this.service.getCharacteristic(Characteristic.CurrentTemperature)
-      .setProps({ minValue: -50, maxValue: 100 })
-      .onGet(() => this.required(num(gateway.state, this.paths.temperature)));
+      .setProps({ minValue: TEMPERATURE_RANGE.min, maxValue: TEMPERATURE_RANGE.max })
+      .onGet(() => this.required(zoneTemperature(gateway.state, zone).temperature));
 
     const setpoint = gateway.state.get(this.paths.setpoint);
     this.service.getCharacteristic(Characteristic.TargetTemperature)
@@ -98,6 +101,31 @@ export class ZoneAccessory {
     await this.platform.guard(this.gateway.write(writes, [{ path: this.paths.setpoint, value: temp }]));
   }
 
+  /**
+   * Shows the zone as No Response while Bosch can't reach its radiator valve,
+   * and logs once when the connection is lost and once when it's back.
+   */
+  private pushTemperature(): void {
+    const { Characteristic, HapStatusError, HAPStatus } = this.platform.api.hap;
+    const name = this.accessory.displayName;
+    const { temperature, problem } = zoneTemperature(this.gateway.state, this.zone);
+    if (problem) {
+      if (!this.noReading) {
+        this.platform.log.warn(`${name}: no connection to the radiator valve (${problem}). `
+          + 'It may need new batteries or re-pairing; showing No Response until it is back.');
+        this.noReading = true;
+      }
+      this.service.getCharacteristic(Characteristic.CurrentTemperature)
+        .updateValue(new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE));
+    } else if (temperature !== undefined) {
+      if (this.noReading) {
+        this.platform.log.info(`${name}: radiator valve connection is back (${temperature} °C)`);
+        this.noReading = false;
+      }
+      this.service.updateCharacteristic(Characteristic.CurrentTemperature, temperature);
+    }
+  }
+
   private push(): void {
     const { Characteristic } = this.platform.api.hap;
     const s = this.gateway.state;
@@ -106,7 +134,7 @@ export class ZoneAccessory {
         this.service.updateCharacteristic(c, v);
       }
     };
-    update(Characteristic.CurrentTemperature, num(s, this.paths.temperature));
+    this.pushTemperature();
     update(Characteristic.TargetTemperature, num(s, this.paths.setpoint));
     update(Characteristic.CurrentHeatingCoolingState, this.currentState());
     if (str(s, this.paths.userMode)) {
