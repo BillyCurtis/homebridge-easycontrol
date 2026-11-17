@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compareVersions, controllerHardware, decodeName, devices, homekitVersion, isHeating, pollPaths, setpointWrites, zoneBattery,
-  zoneHardware, zoneIds,
+  zoneHardware, zoneHasBatteries, zoneIds,
 } from '../src/model.js';
 import { ct200, devicesList, firmware, stateOf, zonesRefEnum } from './fixtures.js';
 
@@ -138,5 +138,20 @@ describe('model and firmware per accessory', () => {
   it('falls back to the gateway firmware when device firmware is missing', () => {
     expect(controllerHardware(list, stateOf([]), '5.4.0').firmware).toBe('5.4.0');
     expect(zoneHardware([], stateOf([]), 'zn1', '5.4.0')).toEqual({ model: 'EasyControl CT200', firmware: '5.4.0' });
+  });
+});
+
+describe('zoneHasBatteries', () => {
+  const list = devices(stateOf([devicesList()]));
+
+  it('is true for zones with radiator valves, with or without the EasyControl', () => {
+    expect(zoneHasBatteries(list, 'zn1')).toBe(true);
+    expect(zoneHasBatteries(list, 'zn2')).toBe(true);
+  });
+
+  it('is false for a zone with only the EasyControl, or nothing', () => {
+    const ct200Only = list.filter((d) => d.type === 'thermostat');
+    expect(zoneHasBatteries(ct200Only, 'zn1')).toBe(false);
+    expect(zoneHasBatteries(list, 'zn9')).toBe(false);
   });
 });

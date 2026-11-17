@@ -15,7 +15,7 @@ export class ZoneAccessory {
   private readonly service: Service;
   private readonly paths: ReturnType<typeof zonePaths>;
   private noReading = false;
-  private readonly battery: Service;
+  private readonly battery?: Service;
   private lowBattery = false;
 
   constructor(
@@ -23,6 +23,8 @@ export class ZoneAccessory {
     private readonly accessory: PlatformAccessory,
     private readonly gateway: GatewayController,
     private readonly zone: string,
+    /** Whether the zone has a battery-powered valve; undefined if unknown. */
+    hasBatteries?: boolean,
   ) {
     const { Service, Characteristic } = platform.api.hap;
     this.paths = zonePaths(zone);
@@ -71,15 +73,23 @@ export class ZoneAccessory {
     // The radiator valves' batteries, shown as the thermostat's battery status.
     // Bosch reports only ok/low, so the level is a stand-in (otherwise it shows
     // as 0 %). Charging doesn't apply to the valves' batteries, so it's left out.
-    this.battery = accessory.getService(Service.Battery) ?? accessory.addService(Service.Battery);
-    this.service.addLinkedService(this.battery);
-    this.battery.getCharacteristic(Characteristic.StatusLowBattery)
-      .onGet(() => this.batteryStatus());
-    this.battery.getCharacteristic(Characteristic.BatteryLevel)
-      .onGet(() => this.batteryLevel());
-    if (this.battery.testCharacteristic(Characteristic.ChargingState)) {
-      // Added by an earlier test build.
-      this.battery.removeCharacteristic(this.battery.getCharacteristic(Characteristic.ChargingState));
+    // A zone with only the mains-powered CT200 gets no battery status; if the
+    // device list couldn't be read, it's kept rather than removed.
+    const existing = accessory.getService(Service.Battery);
+    if (hasBatteries ?? true) {
+      this.battery = existing ?? accessory.addService(Service.Battery);
+      this.service.addLinkedService(this.battery);
+      this.battery.getCharacteristic(Characteristic.StatusLowBattery)
+        .onGet(() => this.batteryStatus());
+      this.battery.getCharacteristic(Characteristic.BatteryLevel)
+        .onGet(() => this.batteryLevel());
+      if (this.battery.testCharacteristic(Characteristic.ChargingState)) {
+        // Added by an earlier test build.
+        this.battery.removeCharacteristic(this.battery.getCharacteristic(Characteristic.ChargingState));
+      }
+    } else if (existing) {
+      this.service.removeLinkedService(existing);
+      accessory.removeService(existing);
     }
 
     gateway.onUpdate(() => this.push());
@@ -160,6 +170,9 @@ export class ZoneAccessory {
 
   /** Updates the battery status and logs once when it goes low and once when it's OK again. */
   private pushBattery(): void {
+    if (!this.battery) {
+      return;
+    }
     const { Characteristic } = this.platform.api.hap;
     const name = this.accessory.displayName;
     const { low, lowDevices } = zoneBattery(this.gateway.state, this.zone);

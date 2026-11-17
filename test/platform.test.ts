@@ -18,7 +18,7 @@ const client = {
 let shutdown: (() => void) | undefined;
 afterEach(() => shutdown?.());
 
-async function setUp(config: Partial<EasyControlConfig>, cached: hap.Accessory[] = []) {
+async function setUp(config: Partial<EasyControlConfig>, cached: hap.Accessory[] = [], bosch: PointtClient = client) {
   const handlers: Record<string, () => void> = {};
   const api = {
     hap,
@@ -32,7 +32,7 @@ async function setUp(config: Partial<EasyControlConfig>, cached: hap.Accessory[]
   const platform = new EasyControlPlatform(log as unknown as Logging, { platform: 'EasyControl', ...config }, api as unknown as API);
   cached.forEach((a) => platform.configureAccessory(a as never));
   shutdown = handlers.shutdown;
-  await (platform as unknown as { setup(c: PointtClient): Promise<void> }).setup(client);
+  await (platform as unknown as { setup(c: PointtClient): Promise<void> }).setup(bosch);
   const registered = api.registerPlatformAccessories.mock.calls.flatMap((c) => c[2] as hap.Accessory[]);
   const removed = api.unregisterPlatformAccessories.mock.calls.flatMap((c) => c[2] as hap.Accessory[]);
   return { registered, removed };
@@ -89,5 +89,22 @@ describe('accessory information', () => {
     old.getService(hap.Service.AccessoryInformation)!.setCharacteristic(hap.Characteristic.FirmwareRevision, '05.04.00');
     await setUp({}, [old]);
     expect(info(old).firmware).toBe('5.4.0');
+  });
+});
+
+describe('battery status at start-up', () => {
+  const battery = (acc: hap.Accessory | undefined) => acc?.getService(hap.Service.Battery);
+
+  it('is added to a zone with radiator valves', async () => {
+    const { registered } = await setUp({});
+    expect(battery(registered.find((a) => a.UUID === hap.uuid.generate('gw:zn1')))).toBeDefined();
+  });
+
+  it('is left off a zone with only the EasyControl', async () => {
+    const ct200Only = devicesList();
+    ct200Only.value = (ct200Only.value as { type: string }[]).filter((d) => d.type === 'thermostat');
+    const bosch = { ...client, bulkGet: async () => stateOf([...ct200, ct200Only, ...firmware()]) } as unknown as PointtClient;
+    const { registered } = await setUp({}, [], bosch);
+    expect(battery(registered.find((a) => a.UUID === hap.uuid.generate('gw:zn1')))).toBeUndefined();
   });
 });

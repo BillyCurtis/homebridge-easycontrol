@@ -8,7 +8,7 @@ import { TokenStore } from './api/tokenStore.js';
 import { GatewayController } from './gateway.js';
 import {
   controllerHardware, decodeName, deviceFirmwarePath, devices, type Hardware, homekitVersion, str, SYSTEM_PATHS, zoneHardware,
-  zoneIds, zonePaths,
+  zoneHasBatteries, zoneIds, zonePaths,
 } from './model.js';
 import {
   DEFAULT_POLL_SECONDS, type EasyControlConfig, MIN_POLL_SECONDS, PLATFORM_NAME, PLUGIN_NAME, tokenPath,
@@ -102,7 +102,8 @@ export class EasyControlPlatform implements DynamicPlatformPlugin {
         const name = decodeName(info.get(zonePaths(zone).name)?.value, zone);
         const hardware = zoneHardware(deviceList, deviceFirmware, zone, fallback);
         const acc = this.accessory(`${gw.deviceId}:${zone}`, name, gw.deviceId, hardware, keep);
-        new ZoneAccessory(this, acc, controller, zone);
+        const hasBatteries = deviceList.length ? zoneHasBatteries(deviceList, zone) : undefined;
+        new ZoneAccessory(this, acc, controller, zone, hasBatteries);
       }
       // With all of its services turned off the system accessory would be empty,
       // which Home shows as unsupported. Leaving it out of `keep` also removes

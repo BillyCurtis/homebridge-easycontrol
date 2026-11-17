@@ -161,6 +161,15 @@ export function devices(state: State): Device[] {
   return Array.isArray(v) ? (v as Device[]) : [];
 }
 
+/**
+ * Whether a zone has a battery-powered device (a radiator valve), so it needs a
+ * battery status. The CT200 is mains-powered and reports its battery as "unknown".
+ */
+export function zoneHasBatteries(list: Device[], zone: string): boolean {
+  return list.some((d) => `zn${d.zone}` === zone
+    && (d.type === 'thermostat_valve' || d.battery === 'ok' || d.battery === LOW_BATTERY));
+}
+
 export interface ZoneBattery {
   low: boolean;
   /** Names of the zone's devices reporting a low battery. */

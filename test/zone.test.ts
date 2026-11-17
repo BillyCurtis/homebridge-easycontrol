@@ -11,7 +11,7 @@ import { devicesList, stateOf } from './fixtures.js';
 
 const { Characteristic, Service } = hap;
 
-function zoneAccessory(zone: string, accessory = new hap.Accessory(zone, hap.uuid.generate(zone))) {
+function zoneAccessory(zone: string, accessory = new hap.Accessory(zone, hap.uuid.generate(zone)), hasBatteries?: boolean) {
   const listeners: (() => void)[] = [];
   const gateway = { state: stateOf(), onUpdate: (fn: () => void) => listeners.push(fn) };
   const log = { info: vi.fn(), warn: vi.fn() };
@@ -21,6 +21,7 @@ function zoneAccessory(zone: string, accessory = new hap.Accessory(zone, hap.uui
     accessory as unknown as PlatformAccessory,
     gateway as unknown as GatewayController,
     zone,
+    hasBatteries,
   );
   const thermostat = accessory.getService(Service.Thermostat)!;
   return { accessory, thermostat, gateway, log, push: () => listeners.forEach((fn) => fn()) };
@@ -147,5 +148,35 @@ describe('radiator valve batteries', () => {
     zoneAccessory('zn1', cached);
     zoneAccessory('zn1', cached);
     expect(cached.services.filter((s) => s.UUID === Service.Battery.UUID)).toHaveLength(1);
+  });
+});
+
+describe('battery status only where there are batteries', () => {
+  it('adds it to a zone with radiator valves', () => {
+    const { accessory } = zoneAccessory('zn1', undefined, true);
+    expect(accessory.getService(Service.Battery)).toBeDefined();
+  });
+
+  it('leaves it off a zone with only the mains-powered EasyControl', () => {
+    const { accessory, gateway, push } = zoneAccessory('zn1', undefined, false);
+    gateway.state.set('/devices/list', devicesList());
+    push();
+    expect(accessory.getService(Service.Battery)).toBeUndefined();
+  });
+
+  it('removes one an earlier version added', () => {
+    const cached = new hap.Accessory('zn1', hap.uuid.generate('zn1'));
+    const thermostat = cached.addService(Service.Thermostat);
+    thermostat.addLinkedService(cached.addService(Service.Battery));
+    zoneAccessory('zn1', cached, false);
+    expect(cached.getService(Service.Battery)).toBeUndefined();
+    expect(thermostat.linkedServices).toHaveLength(0);
+  });
+
+  it('keeps it when the device list could not be read', () => {
+    const cached = new hap.Accessory('zn1', hap.uuid.generate('zn1'));
+    const battery = cached.addService(Service.Battery);
+    zoneAccessory('zn1', cached, undefined);
+    expect(cached.getService(Service.Battery)).toBe(battery);
   });
 });
