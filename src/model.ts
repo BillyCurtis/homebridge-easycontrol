@@ -14,6 +14,12 @@ export const SYSTEM_PATHS = {
   boostDuration: '/heatingCircuits/hc1/boostDuration',
 } as const;
 
+/**
+ * The CT200 has one indoor humidity sensor for the whole system. It is shown
+ * only on this zone's thermostat, so other zones don't repeat the same reading.
+ */
+export const HUMIDITY_ZONE = 'zn1';
+
 export function zonePaths(zone: string) {
   const base = `/zones/${zone}`;
   return {

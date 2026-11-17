@@ -1,7 +1,7 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
 import type { GatewayController } from '../gateway.js';
-import { isAvailable, isHeating, num, setpointWrites, str, SYSTEM_PATHS, zonePaths } from '../model.js';
+import { HUMIDITY_ZONE, isAvailable, isHeating, num, setpointWrites, str, SYSTEM_PATHS, zonePaths } from '../model.js';
 import type { EasyControlPlatform } from '../platform.js';
 
 /** One HomeKit Thermostat per CT200 zone. */
@@ -51,10 +51,19 @@ export class ZoneAccessory {
       .setProps({ validValues: [Characteristic.TemperatureDisplayUnits.CELSIUS] })
       .onGet(() => Characteristic.TemperatureDisplayUnits.CELSIUS);
 
-    this.service.getCharacteristic(Characteristic.CurrentRelativeHumidity)
-      .onGet(() => this.required(num(gateway.state, SYSTEM_PATHS.humidity)));
+    if (this.showsHumidity) {
+      this.service.getCharacteristic(Characteristic.CurrentRelativeHumidity)
+        .onGet(() => this.required(num(gateway.state, SYSTEM_PATHS.humidity)));
+    } else if (this.service.testCharacteristic(Characteristic.CurrentRelativeHumidity)) {
+      // Cached accessories from earlier versions had humidity on every zone.
+      this.service.removeCharacteristic(this.service.getCharacteristic(Characteristic.CurrentRelativeHumidity));
+    }
 
     gateway.onUpdate(() => this.push());
+  }
+
+  private get showsHumidity(): boolean {
+    return this.zone === HUMIDITY_ZONE;
   }
 
   private required<T>(v: T | undefined): T {
@@ -103,7 +112,7 @@ export class ZoneAccessory {
     if (str(s, this.paths.userMode)) {
       update(Characteristic.TargetHeatingCoolingState, this.targetState());
     }
-    if (isAvailable(s, SYSTEM_PATHS.humidity)) {
+    if (this.showsHumidity && isAvailable(s, SYSTEM_PATHS.humidity)) {
       update(Characteristic.CurrentRelativeHumidity, num(s, SYSTEM_PATHS.humidity));
     }
   }
