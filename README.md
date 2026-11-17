@@ -10,12 +10,15 @@ It replaces the XMPP-based CT200 plugins. Those can't log in to accounts migrate
 
 - **Thermostat** per zone:
   - current and target temperature
-  - indoor humidity
-  - heating / idle
+  - heating / idle: a zone shows Heating while it's asking the boiler for heat
   - Auto (follow the schedule) or Heat (manual)
+  - indoor humidity, on the zone that contains the CT200 (its humidity sensor covers the whole system, so other zones don't repeat it)
+  - battery status, on zones with radiator thermostats. It shows Low Battery when any radiator thermostat in the zone reports a low battery. Bosch reports only OK or low, so the level shows as 100 % or 10 %.
 - **Outdoor temperature** sensor. This value comes from the weather service Bosch uses.
 - **Away** switch.
 - **Boost** switch, with optional temperature and duration overrides.
+
+The outdoor sensor and the Away and Boost switches share one accessory. You can hide each of them in the plugin settings (**Show outdoor temperature sensor**, **Show Away switch**, **Show Boost switch**). With all three hidden, the accessory is removed.
 
 When you change the target temperature while the zone follows its schedule, the plugin sets a temporary override by default. The override lasts until the next switch point, the same as turning the dial on the thermostat. To switch the zone to manual mode instead, set **Changing the temperature while on the schedule** to "Switch the zone to manual mode".
 
