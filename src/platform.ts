@@ -94,8 +94,13 @@ export class EasyControlPlatform implements DynamicPlatformPlugin {
         const acc = this.accessory(`${gw.deviceId}:${zone}`, name, gw.deviceId, firmware, keep);
         new ZoneAccessory(this, acc, controller, zone);
       }
-      const sys = this.accessory(`${gw.deviceId}:system`, this.config.name ?? 'Bosch CT200', gw.deviceId, firmware, keep);
-      new SystemAccessory(this, sys, controller);
+      // With all of its services turned off the system accessory would be empty,
+      // which Home shows as unsupported. Leaving it out of `keep` also removes
+      // a previously cached one below.
+      if (SystemAccessory.hasServices(this.config)) {
+        const sys = this.accessory(`${gw.deviceId}:system`, this.config.name ?? 'Bosch CT200', gw.deviceId, firmware, keep);
+        new SystemAccessory(this, sys, controller);
+      }
       this.gateways.push(controller);
     }
 

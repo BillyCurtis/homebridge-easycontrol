@@ -3,12 +3,18 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { GatewayController } from '../gateway.js';
 import { num, str, SYSTEM_PATHS, type Write } from '../model.js';
 import type { EasyControlPlatform } from '../platform.js';
+import type { EasyControlConfig } from '../settings.js';
 
 /** Gateway-wide extras: outdoor temperature, away mode and boost. */
 export class SystemAccessory {
   private outdoor?: Service;
   private away?: Service;
   private boost?: Service;
+
+  /** Whether any of the system services (outdoor temperature, Away, Boost) is turned on. */
+  static hasServices(cfg: EasyControlConfig): boolean {
+    return (cfg.showOutdoorTemperature ?? true) || (cfg.showAway ?? true) || (cfg.showBoost ?? true);
+  }
 
   constructor(
     private readonly platform: EasyControlPlatform,
