@@ -46,3 +46,10 @@ export const devicesList = (batteries: Record<number, string> = {}): Resource =>
     { name: b64('Hall'), zone: 2, protocol: 'homematicip', id: 4, battery: batteries[4] ?? 'ok', signal: 78, type: 'thermostat_valve', warning: 0 },
   ],
 });
+
+/** Firmware as Bosch reports it: per device in x.y.z form, the gateway with leading zeros. */
+export const firmware = (valves: Record<number, string> = {}): Resource[] => [
+  string('/gateway/versionFirmware', '05.04.00'),
+  string('/devices/device1/versionFirmware', '5.4.0'),
+  ...[2, 3, 4].map((id) => string(`/devices/device${id}/versionFirmware`, valves[id] ?? '1.6.0')),
+];

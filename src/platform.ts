@@ -2,11 +2,14 @@ import type { API, DynamicPlatformPlugin, Logging, PlatformAccessory } from 'hom
 
 import { SystemAccessory } from './accessories/system.js';
 import { ZoneAccessory } from './accessories/zone.js';
-import { PointtClient } from './api/client.js';
+import { PointtClient, type Resource } from './api/client.js';
 import { AuthError } from './api/oauth.js';
 import { TokenStore } from './api/tokenStore.js';
 import { GatewayController } from './gateway.js';
-import { decodeName, str, zoneIds, zonePaths } from './model.js';
+import {
+  controllerHardware, decodeName, deviceFirmwarePath, devices, type Hardware, homekitVersion, str, SYSTEM_PATHS, zoneHardware,
+  zoneIds, zonePaths,
+} from './model.js';
 import {
   DEFAULT_POLL_SECONDS, type EasyControlConfig, MIN_POLL_SECONDS, PLATFORM_NAME, PLUGIN_NAME, tokenPath,
 } from './settings.js';
@@ -80,9 +83,15 @@ export class EasyControlPlatform implements DynamicPlatformPlugin {
     for (const gw of gateways) {
       const zones = zoneIds(await client.get(gw.deviceId, '/zones'));
       const info = await client.bulkGet(gw.deviceId, [
-        '/gateway/versionFirmware', ...zones.map((z) => zonePaths(z).name),
+        '/gateway/versionFirmware', SYSTEM_PATHS.devices, ...zones.map((z) => zonePaths(z).name),
       ]);
       const firmware = str(info, '/gateway/versionFirmware') ?? 'unknown';
+      // Each device's firmware, for the model and firmware HomeKit shows per accessory.
+      const deviceList = devices(info);
+      const deviceFirmware = deviceList.length
+        ? await client.bulkGet(gw.deviceId, deviceList.map((d) => deviceFirmwarePath(d.id)))
+        : new Map<string, Resource>();
+      const fallback = homekitVersion(firmware);
       const controller = new GatewayController(gw.deviceId, zones, client, this.log, pollMs);
       this.log.info(`Gateway ${gw.deviceId} (firmware ${firmware}): zones ${zones.join(', ') || 'none'}`);
 
@@ -91,14 +100,16 @@ export class EasyControlPlatform implements DynamicPlatformPlugin {
 
       for (const zone of zones) {
         const name = decodeName(info.get(zonePaths(zone).name)?.value, zone);
-        const acc = this.accessory(`${gw.deviceId}:${zone}`, name, gw.deviceId, firmware, keep);
+        const hardware = zoneHardware(deviceList, deviceFirmware, zone, fallback);
+        const acc = this.accessory(`${gw.deviceId}:${zone}`, name, gw.deviceId, hardware, keep);
         new ZoneAccessory(this, acc, controller, zone);
       }
       // With all of its services turned off the system accessory would be empty,
       // which Home shows as unsupported. Leaving it out of `keep` also removes
       // a previously cached one below.
       if (SystemAccessory.hasServices(this.config)) {
-        const sys = this.accessory(`${gw.deviceId}:system`, this.config.name ?? 'Bosch CT200', gw.deviceId, firmware, keep);
+        const hardware = controllerHardware(deviceList, deviceFirmware, fallback);
+        const sys = this.accessory(`${gw.deviceId}:system`, this.config.name ?? 'Bosch CT200', gw.deviceId, hardware, keep);
         new SystemAccessory(this, sys, controller);
       }
       this.gateways.push(controller);
@@ -110,7 +121,7 @@ export class EasyControlPlatform implements DynamicPlatformPlugin {
     }
   }
 
-  private accessory(key: string, name: string, serial: string, firmware: string, keep: Set<string>): PlatformAccessory {
+  private accessory(key: string, name: string, serial: string, hardware: Hardware, keep: Set<string>): PlatformAccessory {
     const { Service, Characteristic } = this.api.hap;
     const uuid = this.api.hap.uuid.generate(key);
     keep.add(uuid);
@@ -120,11 +131,13 @@ export class EasyControlPlatform implements DynamicPlatformPlugin {
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [acc]);
       this.log.info(`Added accessory ${name}`);
     }
-    acc.getService(Service.AccessoryInformation)!
+    const info = acc.getService(Service.AccessoryInformation)!
       .setCharacteristic(Characteristic.Manufacturer, 'Bosch')
-      .setCharacteristic(Characteristic.Model, 'EasyControl CT200')
-      .setCharacteristic(Characteristic.SerialNumber, `${serial}${key.slice(serial.length)}`)
-      .setCharacteristic(Characteristic.FirmwareRevision, firmware);
+      .setCharacteristic(Characteristic.Model, hardware.model)
+      .setCharacteristic(Characteristic.SerialNumber, `${serial}${key.slice(serial.length)}`);
+    if (hardware.firmware) {
+      info.setCharacteristic(Characteristic.FirmwareRevision, hardware.firmware);
+    }
     return acc;
   }
 }

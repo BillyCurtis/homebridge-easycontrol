@@ -6,12 +6,12 @@ import { SystemAccessory } from '../src/accessories/system.js';
 import type { PointtClient } from '../src/api/client.js';
 import { EasyControlPlatform } from '../src/platform.js';
 import type { EasyControlConfig } from '../src/settings.js';
-import { ct200, stateOf, zonesRefEnum } from './fixtures.js';
+import { ct200, devicesList, firmware, stateOf, zonesRefEnum } from './fixtures.js';
 
 const client = {
   getGateways: async () => [{ deviceId: 'gw', deviceType: 'rrc2' }],
   get: async () => zonesRefEnum,
-  bulkGet: async () => stateOf(ct200),
+  bulkGet: async () => stateOf([...ct200, devicesList(), ...firmware()]),
   put: async () => undefined,
 } as unknown as PointtClient;
 
@@ -65,5 +65,29 @@ describe('system accessory', () => {
     const old = new hap.Accessory('Bosch CT200', hap.uuid.generate('gw:system'));
     const { removed } = await setUp(allOff, [old]);
     expect(removed).toEqual([old]);
+  });
+});
+
+describe('accessory information', () => {
+  const info = (acc: hap.Accessory) => {
+    const s = acc.getService(hap.Service.AccessoryInformation)!;
+    return {
+      model: s.getCharacteristic(hap.Characteristic.Model).value,
+      firmware: s.getCharacteristic(hap.Characteristic.FirmwareRevision).value,
+    };
+  };
+
+  it('shows each device\'s model and firmware in a form the Home app accepts', async () => {
+    const { registered } = await setUp({});
+    const byKey = (key: string) => registered.find((a) => a.UUID === hap.uuid.generate(key))!;
+    expect(info(byKey('gw:zn1'))).toEqual({ model: 'EasyControl CT200', firmware: '5.4.0' });
+    expect(info(byKey('gw:system'))).toEqual({ model: 'EasyControl CT200', firmware: '5.4.0' });
+  });
+
+  it('fixes the firmware on accessories cached with the old 05.04.00', async () => {
+    const old = new hap.Accessory('Kitchen', hap.uuid.generate('gw:zn1'));
+    old.getService(hap.Service.AccessoryInformation)!.setCharacteristic(hap.Characteristic.FirmwareRevision, '05.04.00');
+    await setUp({}, [old]);
+    expect(info(old).firmware).toBe('5.4.0');
   });
 });

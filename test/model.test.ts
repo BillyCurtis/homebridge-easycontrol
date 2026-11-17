@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { decodeName, isHeating, pollPaths, setpointWrites, zoneBattery, zoneIds } from '../src/model.js';
-import { ct200, devicesList, stateOf, zonesRefEnum } from './fixtures.js';
+import {
+  compareVersions, controllerHardware, decodeName, devices, homekitVersion, isHeating, pollPaths, setpointWrites, zoneBattery,
+  zoneHardware, zoneIds,
+} from '../src/model.js';
+import { ct200, devicesList, firmware, stateOf, zonesRefEnum } from './fixtures.js';
 
 describe('zoneIds', () => {
   it('keeps only znN references', () => {
@@ -86,5 +89,54 @@ describe('zoneBattery', () => {
 
   it('polls the device list', () => {
     expect(pollPaths(['zn1'])).toContain('/devices/list');
+  });
+});
+
+describe('homekitVersion', () => {
+  it('drops the leading zeros the Home app rejects', () => {
+    expect(homekitVersion('05.04.00')).toBe('5.4.0');
+  });
+  it('keeps versions already in HomeKit form', () => {
+    expect(homekitVersion('1.6.0')).toBe('1.6.0');
+    expect(homekitVersion('2.10')).toBe('2.10');
+  });
+  it('rejects anything that is not a version', () => {
+    expect(homekitVersion('unknown')).toBeUndefined();
+    expect(homekitVersion('1.2.3.4')).toBeUndefined();
+    expect(homekitVersion(undefined)).toBeUndefined();
+  });
+});
+
+describe('compareVersions', () => {
+  it('compares numerically, not as text', () => {
+    expect(compareVersions('1.10.0', '1.9.0')).toBeGreaterThan(0);
+    expect(compareVersions('1.6.0', '1.6')).toBe(0);
+    expect(compareVersions('1.5.9', '1.6.0')).toBeLessThan(0);
+  });
+});
+
+describe('model and firmware per accessory', () => {
+  const list = devices(stateOf([devicesList()]));
+
+  it('shows the EasyControl for a zone that contains it', () => {
+    expect(zoneHardware(list, stateOf(firmware()), 'zn1', '5.4.0')).toEqual({ model: 'EasyControl CT200', firmware: '5.4.0' });
+  });
+
+  it('shows the radiator valve for a zone without the EasyControl', () => {
+    expect(zoneHardware(list, stateOf(firmware()), 'zn2', '5.4.0')).toEqual({ model: 'Radiator Thermostat', firmware: '1.6.0' });
+  });
+
+  it('shows the oldest firmware when a zone\'s valves differ', () => {
+    const twoValves = list.map((d) => (d.id === 3 ? { ...d, zone: 2 } : d));
+    expect(zoneHardware(twoValves, stateOf(firmware({ 3: '1.5.2', 4: '1.6.0' })), 'zn2').firmware).toBe('1.5.2');
+  });
+
+  it('shows the EasyControl for the system accessory', () => {
+    expect(controllerHardware(list, stateOf(firmware()))).toEqual({ model: 'EasyControl CT200', firmware: '5.4.0' });
+  });
+
+  it('falls back to the gateway firmware when device firmware is missing', () => {
+    expect(controllerHardware(list, stateOf([]), '5.4.0').firmware).toBe('5.4.0');
+    expect(zoneHardware([], stateOf([]), 'zn1', '5.4.0')).toEqual({ model: 'EasyControl CT200', firmware: '5.4.0' });
   });
 });

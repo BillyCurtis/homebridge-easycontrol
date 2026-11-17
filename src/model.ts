@@ -174,3 +174,64 @@ export function zoneBattery(state: State, zone: string): ZoneBattery {
     .map((d) => decodeName(d.name, `device ${d.id}`));
   return { low: lowDevices.length > 0, lowDevices };
 }
+
+export const MODEL_CT200 = 'EasyControl CT200';
+export const MODEL_VALVE = 'Radiator Thermostat';
+
+/** Where Bosch reports a device's firmware, already in HomeKit's x.y.z form. */
+export const deviceFirmwarePath = (id: number) => `/devices/device${id}/versionFirmware`;
+
+/**
+ * A firmware version HomeKit can show. The Home app only accepts plain numbers
+ * like `5.4.0`, so `05.04.00` (how `/gateway/versionFirmware` reports it) shows
+ * as 0.0; leading zeros are dropped. Anything that isn't a version is undefined.
+ */
+export function homekitVersion(raw: unknown): string | undefined {
+  const m = typeof raw === 'string' ? raw.trim().match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/) : null;
+  return m ? m.slice(1).filter((p) => p !== undefined).map(Number).join('.') : undefined;
+}
+
+/** Negative if a is older than b, positive if newer, 0 if the same. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d) {
+      return d;
+    }
+  }
+  return 0;
+}
+
+/** What a HomeKit accessory reports as its model and firmware. */
+export interface Hardware {
+  model: string;
+  firmware?: string;
+}
+
+const firmwareOf = (fw: State, d: Device) => homekitVersion(fw.get(deviceFirmwarePath(d.id))?.value);
+
+/** The EasyControl itself, for accessories that stand for the whole system. */
+export function controllerHardware(list: Device[], fw: State, fallback?: string): Hardware {
+  const ct200 = list.find((d) => d.type === 'thermostat');
+  return { model: MODEL_CT200, firmware: (ct200 && firmwareOf(fw, ct200)) ?? fallback };
+}
+
+/**
+ * The device that does the work in a zone: the EasyControl if the zone contains
+ * it, otherwise its radiator valves. With several valves on different firmware,
+ * the oldest is shown, so a valve that needs updating is visible.
+ */
+export function zoneHardware(list: Device[], fw: State, zone: string, fallback?: string): Hardware {
+  const inZone = list.filter((d) => `zn${d.zone}` === zone);
+  if (inZone.some((d) => d.type === 'thermostat')) {
+    return controllerHardware(inZone, fw, fallback);
+  }
+  const valves = inZone.filter((d) => d.type === 'thermostat_valve');
+  if (!valves.length) {
+    return { model: MODEL_CT200, firmware: fallback };
+  }
+  const versions = valves.map((d) => firmwareOf(fw, d)).filter((v): v is string => !!v);
+  return { model: MODEL_VALVE, firmware: versions.sort(compareVersions)[0] };
+}
